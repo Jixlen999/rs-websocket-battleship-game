@@ -5,7 +5,7 @@ import { wss } from '../ws_server/index';
 type User = {
   name: string;
   passwordHash: string;
-  salt: string; // уникальная для каждого пользователя, используется, чтобы более безопасно захешировать пароль
+  salt: string; // unique for every user, used to create safer hash
   wins: number;
 };
 
@@ -15,10 +15,28 @@ type WSMessage = {
   id: number;
 };
 
+type Ship = {
+  position: {
+    x: number;
+    y: number;
+  };
+  direction: boolean;
+  length: number;
+  type: 'small' | 'medium' | 'large' | 'huge';
+};
+
+type GameSession = {
+  players: string[]; // players' Ids
+  ships: Map<string, Ship[]>; // playerId, Ships[]
+  ready: Set<string>; // plyers who sent add_ships
+  currentPlayer: string; // who's turn
+};
+
 const users = new Map<string, User>(); // id, User
 const sessions = new Map<WebSocket, string>(); // unique ws, playerId
 const loggedInUsers = new Map<string, string>(); // name, playerId
 const activeRooms = new Map<string, string[]>(); // roomId, playerId[]
+const games = new Map<string, GameSession>(); // gameId, session
 
 function send(ws: WebSocket, msg: WSMessage) {
   if (ws.readyState === WebSocket.OPEN) {
@@ -36,6 +54,9 @@ export const handleMessage = (ws: WebSocket, msg: WSMessage) => {
       break;
     case 'add_user_to_room':
       handleAddUserToRoom(ws, msg);
+      break;
+    case 'add_ships':
+      handleAddShips(ws, msg);
       break;
   }
 };
@@ -149,6 +170,51 @@ const createGameForBoth = (players: string[]) => {
       }
     });
   });
+
+  games.set(gameId, {
+    players,
+    ships: new Map(),
+    ready: new Set(),
+    currentPlayer: Math.random() < 0.5 ? players[0] : players[1],
+  });
+};
+
+const handleAddShips = (ws: WebSocket, msg: WSMessage) => {
+  const { gameId, ships, indexPlayer } = JSON.parse(msg.data);
+  const game = games.get(gameId);
+  game?.ships.set(indexPlayer, ships);
+  game?.ready.add(indexPlayer);
+
+  if (game?.ready.size === 2) {
+    game?.players.forEach((playerId) => {
+      const playerWs = findWsdByPlayerId(playerId);
+
+      if (playerWs) {
+        send(playerWs, {
+          type: 'start_game',
+          data: JSON.stringify({
+            ships: game.ships.get(playerId),
+            currentPlayerIndex: game.currentPlayer,
+          }),
+          id: 0,
+        });
+
+        send(playerWs, {
+          type: 'turn',
+          data: JSON.stringify({
+            currentPlayer: game?.currentPlayer,
+          }),
+          id: 0,
+        });
+      }
+    });
+  }
+};
+
+const findWsdByPlayerId = (playerId: string) => {
+  return Array.from(sessions.entries()).find(
+    ([ws, id]) => playerId === id,
+  )?.[0];
 };
 
 const updateRoomsForAll = () => {
