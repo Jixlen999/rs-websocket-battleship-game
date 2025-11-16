@@ -106,6 +106,7 @@ export const handleAddUserToRoom = (ws: WebSocket, msg: WSMessage) => {
 
   const playersInRoom = activeRooms.get(indexRoom);
   if (!playersInRoom) return;
+  if (playersInRoom[0] === playerId) return;
 
   playersInRoom.push(playerId);
   activeRooms.delete(indexRoom);
