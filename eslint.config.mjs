@@ -11,10 +11,6 @@ export default tseslint.config(
   {
     files: ['src/**/*.{ts,js}'],
     ignores: ['dist', 'node_modules'],
-    env: {
-      browser: true,
-      node: true,
-    },
     languageOptions: {
       globals: {
         ...globals.node,

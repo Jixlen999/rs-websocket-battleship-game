@@ -1,11 +1,12 @@
-import { WebSocketServer } from 'ws';
-import { handleClientDisconnect, handleMessage } from '../handlers/index';
+import { type WebSocket, WebSocketServer } from 'ws';
+import { handleMessage } from '../ws_handlers/index';
+import { handleClientDisconnect } from './helpers/index';
 
 const PORT = 3000;
 
 export const wss = new WebSocketServer({ port: PORT });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws: WebSocket) => {
   console.log('Client connected');
 
   ws.on('message', (message) => {
