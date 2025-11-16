@@ -198,7 +198,6 @@ const handleAddShips = (msg: WSMessage) => {
   const shipsWithHits = ships.map((ship: Ship) => ({
     ...ship,
     hits: 0,
-    hitCells: [],
   }));
 
   game?.ships.set(indexPlayer, shipsWithHits);
@@ -335,6 +334,79 @@ const attack = (gameId: string, x: number, y: number, indexPlayer: string) => {
       updateTurn(currentGame, indexPlayer);
     }
   }
+};
+
+export const handleClientDisconnect = (ws: WebSocket) => {
+  const playerId = sessions.get(ws);
+  if (!playerId) return;
+
+  sessions.delete(ws);
+
+  for (const [roomId, players] of activeRooms.entries()) {
+    const index = players.indexOf(playerId);
+    if (index !== -1) {
+      players.splice(index, 1);
+
+      if (players.length === 1) {
+        const remainingPlayerId = players[0];
+        const gameId = findGameIdByPlayerId(remainingPlayerId);
+
+        if (gameId) {
+          finishGame(gameId, remainingPlayerId);
+        }
+      }
+
+      if (players.length === 0) {
+        activeRooms.delete(roomId);
+      }
+
+      updateRoomsForAll();
+    }
+  }
+
+  const gameId = findGameIdByPlayerId(playerId);
+  if (gameId) {
+    finishGame(gameId, getOpponentId(gameId, playerId));
+  }
+};
+
+const getOpponentId = (gameId: string, playerId: string) => {
+  const game = games.get(gameId);
+  if (!game) return;
+  return game.players.find((p) => p !== playerId);
+};
+
+const finishGame = (gameId: string, winnerId?: string) => {
+  const game = games.get(gameId);
+  if (!game) return;
+
+  game.players.forEach((pid) => {
+    const ws = findWsByPlayerId(pid);
+    if (ws) {
+      send(ws, {
+        type: 'finish',
+        data: JSON.stringify({ winPlayer: winnerId || null }),
+        id: 0,
+      });
+    }
+  });
+
+  if (winnerId) {
+    const user = users.get(winnerId);
+    if (user) user.wins++;
+    updateWinnersForAll();
+  }
+
+  games.delete(gameId);
+};
+
+const findGameIdByPlayerId = (playerId: string): string | undefined => {
+  for (const [gameId, game] of games.entries()) {
+    if (game.players.includes(playerId)) {
+      return gameId;
+    }
+  }
+  return undefined;
 };
 
 const findWsByPlayerId = (playerId: string) => {

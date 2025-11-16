@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { handleMessage } from '../handlers/index';
+import { handleClientDisconnect, handleMessage } from '../handlers/index';
 
 const PORT = 3000;
 
@@ -21,6 +21,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('Client disconnected');
+    handleClientDisconnect(ws);
   });
 
   ws.on('error', (error) => {
