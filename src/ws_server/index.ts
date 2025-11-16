@@ -31,6 +31,7 @@ wss.on('connection', (ws: WebSocket) => {
 });
 
 console.log(`WebSocket server started on port ${PORT}`);
+console.log(`WebSocket parameters: `, wss);
 
 process.on('SIGINT', () => {
   console.log('Shutting down WebSocket server');
