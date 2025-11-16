@@ -93,6 +93,15 @@ export const handleCreateRoom = (ws: WebSocket) => {
   const playerId = sessions.get(ws);
   if (!playerId) return;
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const existingRoom = Array.from(activeRooms.entries()).find(([_, players]) =>
+    players.includes(playerId),
+  );
+
+  if (existingRoom) {
+    return;
+  }
+
   const roomId = randomUUID();
   activeRooms.set(roomId, [playerId]);
 
@@ -109,7 +118,14 @@ export const handleAddUserToRoom = (ws: WebSocket, msg: WSMessage) => {
   if (playersInRoom[0] === playerId) return;
 
   playersInRoom.push(playerId);
-  activeRooms.delete(indexRoom);
+
+  playersInRoom.forEach((player) => {
+    for (const [roomId, roomPlayers] of activeRooms.entries()) {
+      if (roomPlayers.includes(player)) {
+        activeRooms.delete(roomId);
+      }
+    }
+  });
 
   createGameForBoth(playersInRoom);
   updateRoomsForAll();
