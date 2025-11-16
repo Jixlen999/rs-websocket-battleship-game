@@ -31,7 +31,6 @@ type GameSession = {
   ships: Map<string, Ship[]>; // playerId, Ships[]
   ready: Set<string>; // plyers who sent add_ships
   currentPlayer: string; // who's turn
-  turnTimeout?: NodeJS.Timeout; // turn timeout (15 sec)
 };
 
 const users = new Map<string, User>(); // id, User
@@ -62,6 +61,9 @@ export const handleMessage = (ws: WebSocket, msg: WSMessage) => {
       break;
     case 'attack':
       handleAttack(msg);
+      break;
+    case 'randomAttack':
+      handleRandomAttack(msg);
       break;
   }
 };
@@ -221,6 +223,19 @@ const handleAddShips = (msg: WSMessage) => {
 
 const handleAttack = (msg: WSMessage) => {
   const { gameId, x, y, indexPlayer } = JSON.parse(msg.data);
+
+  attack(gameId, x, y, indexPlayer);
+};
+
+const handleRandomAttack = (msg: WSMessage) => {
+  const { gameId, indexPlayer } = JSON.parse(msg.data);
+  const randomX = Math.floor(Math.random() * 10) + 1;
+  const randomY = Math.floor(Math.random() * 10) + 1;
+
+  attack(gameId, randomX, randomY, indexPlayer);
+};
+
+const attack = (gameId: string, x: number, y: number, indexPlayer: string) => {
   const currentGame = games.get(gameId);
   if (!currentGame) return;
 
@@ -308,21 +323,7 @@ const shipContainsPoint = (ship: Ship, x: number, y: number) => {
   return false;
 };
 
-const startTurnTimer = (game: GameSession, duration = 15) => {
-  clearTimeout(game.turnTimeout);
-
-  game.turnTimeout = setTimeout(() => {
-    const nextPlayer = game.players.find((p) => p !== game.currentPlayer);
-    if (!nextPlayer) return;
-
-    game.currentPlayer = nextPlayer;
-    updateTurn(game);
-  }, duration * 1000);
-};
-
 const updateTurn = (game: GameSession, nextCurrentPlayerId?: string) => {
-  startTurnTimer(game);
-
   if (nextCurrentPlayerId) game.currentPlayer = nextCurrentPlayerId;
 
   game?.players.forEach((playerId) => {
