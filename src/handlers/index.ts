@@ -20,9 +20,10 @@ type Ship = {
     x: number;
     y: number;
   };
-  direction: boolean;
+  direction: boolean; // true - vertical, false - horizontal
   length: number;
   type: 'small' | 'medium' | 'large' | 'huge';
+  hits: number;
 };
 
 type GameSession = {
@@ -30,6 +31,7 @@ type GameSession = {
   ships: Map<string, Ship[]>; // playerId, Ships[]
   ready: Set<string>; // plyers who sent add_ships
   currentPlayer: string; // who's turn
+  turnTimeout?: NodeJS.Timeout; // turn timeout (15 sec)
 };
 
 const users = new Map<string, User>(); // id, User
@@ -56,7 +58,10 @@ export const handleMessage = (ws: WebSocket, msg: WSMessage) => {
       handleAddUserToRoom(ws, msg);
       break;
     case 'add_ships':
-      handleAddShips(ws, msg);
+      handleAddShips(msg);
+      break;
+    case 'attack':
+      handleAttack(msg);
       break;
   }
 };
@@ -72,7 +77,9 @@ const handleReg = (ws: WebSocket, msg: WSMessage) => {
       .digest('hex');
 
     if (currentUserPasswordHash === user?.passwordHash) {
-      return send(ws, {
+      sessions.set(ws, playerId);
+
+      send(ws, {
         type: 'reg',
         data: JSON.stringify({
           name,
@@ -82,11 +89,13 @@ const handleReg = (ws: WebSocket, msg: WSMessage) => {
         }),
         id: 0,
       });
-    } else {
+
       updateRoomsForAll();
       updateWinnersForAll();
 
-      return send(ws, {
+      return;
+    } else {
+      send(ws, {
         type: 'reg',
         data: JSON.stringify({
           name,
@@ -96,6 +105,7 @@ const handleReg = (ws: WebSocket, msg: WSMessage) => {
         }),
         id: 0,
       });
+      return;
     }
   } else {
     const salt = randomBytes(16).toString('hex');
@@ -129,8 +139,6 @@ const handleReg = (ws: WebSocket, msg: WSMessage) => {
 const handleCreateRoom = (ws: WebSocket, msg: WSMessage) => {
   const playerId = sessions.get(ws);
   if (!playerId) return;
-
-  const name = users.get(playerId)?.name;
 
   const roomId = randomUUID();
   activeRooms.set(roomId, [playerId]);
@@ -179,15 +187,21 @@ const createGameForBoth = (players: string[]) => {
   });
 };
 
-const handleAddShips = (ws: WebSocket, msg: WSMessage) => {
+const handleAddShips = (msg: WSMessage) => {
   const { gameId, ships, indexPlayer } = JSON.parse(msg.data);
   const game = games.get(gameId);
-  game?.ships.set(indexPlayer, ships);
+
+  const shipsWithHits = ships.map((ship: Ship) => ({
+    ...ship,
+    hits: 0,
+  }));
+
+  game?.ships.set(indexPlayer, shipsWithHits);
   game?.ready.add(indexPlayer);
 
   if (game?.ready.size === 2) {
     game?.players.forEach((playerId) => {
-      const playerWs = findWsdByPlayerId(playerId);
+      const playerWs = findWsByPlayerId(playerId);
 
       if (playerWs) {
         send(playerWs, {
@@ -198,23 +212,131 @@ const handleAddShips = (ws: WebSocket, msg: WSMessage) => {
           }),
           id: 0,
         });
-
-        send(playerWs, {
-          type: 'turn',
-          data: JSON.stringify({
-            currentPlayer: game?.currentPlayer,
-          }),
-          id: 0,
-        });
       }
     });
+
+    updateTurn(game);
   }
 };
 
-const findWsdByPlayerId = (playerId: string) => {
+const handleAttack = (msg: WSMessage) => {
+  const { gameId, x, y, indexPlayer } = JSON.parse(msg.data);
+  const currentGame = games.get(gameId);
+  if (!currentGame) return;
+
+  if (currentGame.currentPlayer !== indexPlayer) {
+    return;
+  }
+
+  const enemyPlayer = currentGame?.players.find(
+    (player) => player !== indexPlayer,
+  );
+
+  if (!enemyPlayer) return;
+
+  const enemyShips = currentGame?.ships.get(enemyPlayer);
+  const enemyShipHit = enemyShips?.find((ship) =>
+    shipContainsPoint(ship, x, y),
+  );
+
+  if (enemyShipHit) {
+    enemyShipHit.hits++;
+
+    const status =
+      enemyShipHit.hits === enemyShipHit.length ? 'killed' : 'shot';
+
+    currentGame.players.forEach((player) => {
+      const currentPlayerWs = findWsByPlayerId(player);
+      if (!currentPlayerWs) return;
+
+      send(currentPlayerWs, {
+        type: 'attack',
+        data: JSON.stringify({
+          position: {
+            x,
+            y,
+          },
+          currentPlayer: indexPlayer,
+          status,
+        }),
+        id: 0,
+      });
+    });
+  }
+
+  if (!enemyShipHit) {
+    currentGame.players.forEach((player) => {
+      const currentPlayerWs = findWsByPlayerId(player);
+      if (!currentPlayerWs) return;
+
+      send(currentPlayerWs, {
+        type: 'attack',
+        data: JSON.stringify({
+          position: {
+            x,
+            y,
+          },
+          currentPlayer: indexPlayer,
+          status: 'miss',
+        }),
+        id: 0,
+      });
+    });
+  }
+
+  if (!enemyShipHit) {
+    updateTurn(currentGame, enemyPlayer);
+  } else {
+    updateTurn(currentGame, indexPlayer);
+  }
+};
+
+const findWsByPlayerId = (playerId: string) => {
   return Array.from(sessions.entries()).find(
     ([ws, id]) => playerId === id,
   )?.[0];
+};
+
+const shipContainsPoint = (ship: Ship, x: number, y: number) => {
+  for (let i = 0; i < ship.length; i++) {
+    const shipX = !ship.direction ? ship.position.x + i : ship.position.x;
+    const shipY = !ship.direction ? ship.position.y : ship.position.y + i;
+
+    if (shipX === x && shipY === y) return true;
+  }
+
+  return false;
+};
+
+const startTurnTimer = (game: GameSession, duration = 15) => {
+  clearTimeout(game.turnTimeout);
+
+  game.turnTimeout = setTimeout(() => {
+    const nextPlayer = game.players.find((p) => p !== game.currentPlayer);
+    if (!nextPlayer) return;
+
+    game.currentPlayer = nextPlayer;
+    updateTurn(game);
+  }, duration * 1000);
+};
+
+const updateTurn = (game: GameSession, nextCurrentPlayerId?: string) => {
+  startTurnTimer(game);
+
+  if (nextCurrentPlayerId) game.currentPlayer = nextCurrentPlayerId;
+
+  game?.players.forEach((playerId) => {
+    const playerWs = findWsByPlayerId(playerId);
+    if (!playerWs) return;
+
+    send(playerWs, {
+      type: 'turn',
+      data: JSON.stringify({
+        currentPlayer: game?.currentPlayer,
+      }),
+      id: 0,
+    });
+  });
 };
 
 const updateRoomsForAll = () => {
