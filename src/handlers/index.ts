@@ -43,6 +43,7 @@ const games = new Map<string, GameSession>(); // gameId, session
 function send(ws: WebSocket, msg: WSMessage) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
+    console.log('Sent response:', JSON.stringify(msg));
   }
 }
 

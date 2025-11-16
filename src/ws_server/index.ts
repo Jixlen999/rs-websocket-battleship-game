@@ -30,3 +30,12 @@ wss.on('connection', (ws) => {
 });
 
 console.log(`WebSocket server started on port ${PORT}`);
+
+process.on('SIGINT', () => {
+  console.log('Shutting down WebSocket server');
+  wss.close(() => {
+    console.log('WebSocket server closed');
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 5000);
+});
