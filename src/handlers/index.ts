@@ -31,6 +31,7 @@ type GameSession = {
   ships: Map<string, Ship[]>; // playerId, Ships[]
   ready: Set<string>; // plyers who sent add_ships
   currentPlayer: string; // who's turn
+  shots: Map<string, { x: number; y: number }[]>; // splayerId, shotXY
 };
 
 const users = new Map<string, User>(); // id, User
@@ -186,6 +187,7 @@ const createGameForBoth = (players: string[]) => {
     ships: new Map(),
     ready: new Set(),
     currentPlayer: Math.random() < 0.5 ? players[0] : players[1],
+    shots: new Map(players.map((player) => [player, []])),
   });
 };
 
@@ -196,6 +198,7 @@ const handleAddShips = (msg: WSMessage) => {
   const shipsWithHits = ships.map((ship: Ship) => ({
     ...ship,
     hits: 0,
+    hitCells: [],
   }));
 
   game?.ships.set(indexPlayer, shipsWithHits);
@@ -254,6 +257,14 @@ const attack = (gameId: string, x: number, y: number, indexPlayer: string) => {
     shipContainsPoint(ship, x, y),
   );
 
+  const playerShots = currentGame.shots.get(indexPlayer) || [];
+  const alreadyHit = playerShots?.some((cell) => cell.x === x && cell.y === y);
+
+  if (alreadyHit) return;
+
+  playerShots.push({ x, y });
+  currentGame.shots.set(indexPlayer, playerShots);
+
   if (enemyShipHit) {
     enemyShipHit.hits++;
 
@@ -302,7 +313,27 @@ const attack = (gameId: string, x: number, y: number, indexPlayer: string) => {
   if (!enemyShipHit) {
     updateTurn(currentGame, enemyPlayer);
   } else {
-    updateTurn(currentGame, indexPlayer);
+    if (!enemyShips?.some((ship) => ship.hits !== ship.length)) {
+      currentGame?.players.forEach((playerId) => {
+        const playerWs = findWsByPlayerId(playerId);
+        if (!playerWs) return;
+
+        send(playerWs, {
+          type: 'finish',
+          data: JSON.stringify({
+            winPlayer: indexPlayer,
+          }),
+          id: 0,
+        });
+      });
+      const winner = users.get(indexPlayer);
+      if (!winner) return;
+
+      winner.wins++;
+      updateWinnersForAll();
+    } else {
+      updateTurn(currentGame, indexPlayer);
+    }
   }
 };
 
